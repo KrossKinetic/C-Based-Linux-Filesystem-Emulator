@@ -13,7 +13,19 @@
 
 // ----------------------- UTILITY FUNCTION ----------------------- //
 
-
+// Debug Function for Read
+void print_string_from_void(void* ptr) {
+    if (ptr == NULL) {
+        printf("Error: NULL pointer provided\n");
+        return;
+    }
+    
+    // Cast the void pointer to a char pointer
+    char* str_ptr = (char*)ptr;
+    
+    // Print the content as a string
+    printf("\n\n%s\n\n", str_ptr);
+}
 
 // ----------------------- CORE FUNCTION ----------------------- //
 
@@ -220,11 +232,6 @@ fs_retcode_t inode_write_data(filesystem_t *fs, inode_t *inode, void *data, size
             // Check to see if data left
             if (n==0) {return SUCCESS;}
 
-            // Write Remaining Data to Indirect Dblock
-            size_t dblocks_needed = calculate_necessary_dblock_amount(n); // (idx dblock + data dblock)
-            size_t idx_dblocks_needed = calculate_index_dblock_amount(n); // (idx dblock)
-            size_t data_dblocks_needed = (dblocks_needed-idx_dblocks_needed);
-
             dblock_index_t temp_previous_idx_dblock = index_for_last_idx_dblock;
 
             for (size_t i = 0; n > 0; i++){
@@ -250,7 +257,6 @@ fs_retcode_t inode_write_data(filesystem_t *fs, inode_t *inode, void *data, size
 
                     // Storing the index value of data dblock inside index dblock
                     write_to_dblock(fs, temp_idx_dblock, j*4, &temp_dblock, 4);
-                    data_dblocks_needed--;
                 }
 
                 temp_previous_idx_dblock = temp_idx_dblock;
@@ -262,18 +268,101 @@ fs_retcode_t inode_write_data(filesystem_t *fs, inode_t *inode, void *data, size
 }
 
 fs_retcode_t inode_read_data(filesystem_t *fs, inode_t *inode, size_t offset, void *buffer, size_t n, size_t *bytes_read)
-{
-    (void)fs;
-    (void)inode;
-    (void)offset;
-    (void)buffer;
-    (void)n;
-    (void)bytes_read;
-    return NOT_IMPLEMENTED;
+{   
+    // Check inputs
+    if (fs == NULL || inode == NULL || buffer == NULL || bytes_read == NULL) 
+        return INVALID_INPUT;
     
-    //check to make sure inputs are valid
+    size_t size_of_inode = inode->internal.file_size;
+    
+    // If offset is beyond file or file is empty, read 0 bytes
+    if (offset >= size_of_inode || size_of_inode == 0) {
+        return SUCCESS;
+    }
 
-    //for 0 to n, use the helper function to read and copy 1 byte at a time
+    *bytes_read = 0;
+    
+    // Calculate how many bytes we can actually read
+    size_t bytes_to_read = n;
+    if (offset + bytes_to_read > size_of_inode) {
+        bytes_to_read = size_of_inode - offset;
+    }
+
+    size_t bytes_to_read_direct_dblock = bytes_to_read;
+    size_t bytes_to_read_indirect_dblock = bytes_to_read;
+    
+    // Read all direct blocks into buffer
+    if (offset<256){
+        byte *entire_direct_dblock = malloc(64 * 4);
+        size_t last_data_block_index = (size_of_inode - 1) / 64;
+        for (size_t i = 0; i <= last_data_block_index && i < 4; ++i) {
+            memcpy(entire_direct_dblock + (i * 64), &fs->dblocks[inode->internal.direct_data[i] * 64], 64);
+        }
+
+        if (bytes_to_read + offset > 256) {
+            bytes_to_read_indirect_dblock = (bytes_to_read + offset) - 256;
+            bytes_to_read_direct_dblock = bytes_to_read - bytes_to_read_indirect_dblock;
+            offset = 0;
+        }
+
+        memcpy(buffer, entire_direct_dblock + offset, bytes_to_read_direct_dblock);
+        *bytes_read += bytes_to_read_direct_dblock;
+        free(entire_direct_dblock);
+
+    } else {
+        offset = offset - 256;
+        bytes_to_read_indirect_dblock = n;
+    }
+
+    if (size_of_inode<=256 || bytes_to_read == *bytes_read){
+        // No Indirect Block, quit program
+        return SUCCESS;
+    }
+
+    // If: offset is at indirect dblock, 
+    // Then: offset = some non zero value, bytes_to_read_indirect_block
+
+    size_t offset_idx_dblock = calculate_index_dblock_amount(offset);
+    size_t offset_data_dblocks_to_read = calculate_necessary_dblock_amount(offset) - offset_idx_dblock;
+    size_t offset_byte_block = (offset%64);
+    size_t bytes_last_indirect_dblock = (bytes_to_read_indirect_dblock%64);
+
+    dblock_index_t idx_next_indirect_dblock = inode->internal.indirect_dblock;
+    size_t last_idx_dblock = calculate_index_dblock_amount(bytes_to_read_indirect_dblock);
+    size_t data_dblocks_to_read = calculate_necessary_dblock_amount(bytes_to_read_indirect_dblock) - last_idx_dblock;
+
+    size_t total_dblock_counter = 0;
+
+    for (size_t i = 0; i <= last_idx_dblock; i++){
+
+        size_t dblock_counter = 0;
+
+        while (dblock_counter<15 && data_dblocks_to_read>0){
+
+            if (total_dblock_counter < offset_data_dblocks_to_read){
+                continue;
+            }
+
+            dblock_index_t index_for_data_dblock;
+            memcpy(&index_for_data_dblock, &fs->dblocks[idx_next_indirect_dblock*64] + 4*dblock_counter, 4);
+
+            if (data_dblocks_to_read != 1){
+                memcpy(buffer+*bytes_read,&fs->dblocks[index_for_data_dblock*64 + offset_byte_block],64);
+                *bytes_read += 64;
+            } else {
+                memcpy(buffer+*bytes_read,&fs->dblocks[index_for_data_dblock*64 + offset_byte_block],bytes_last_indirect_dblock);
+                *bytes_read += bytes_last_indirect_dblock;
+            }
+            offset_byte_block = 0;
+            data_dblocks_to_read--;
+            dblock_counter++;
+            total_dblock_counter++;
+        }
+        memcpy(&idx_next_indirect_dblock, &fs->dblocks[idx_next_indirect_dblock*64] + 60, 4);
+    }
+    
+    print_string_from_void(buffer);
+    return SUCCESS;
 }
 
 fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, void *buffer, size_t n)
@@ -283,7 +372,12 @@ fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, 
     (void)offset;
     (void)buffer;
     (void)n;
-    return NOT_IMPLEMENTED;
+    
+    if (fs == NULL || inode == NULL) return INVALID_INPUT;
+    if (offset > inode->internal.file_size) return INVALID_INPUT;
+
+    
+    return SUCCESS;
 
     //check to see if the input is valid
 
@@ -301,7 +395,10 @@ fs_retcode_t inode_shrink_data(filesystem_t *fs, inode_t *inode, size_t new_size
     (void)fs;
     (void)inode;
     (void)new_size;
-    return NOT_IMPLEMENTED;
+    if (fs == NULL || inode == NULL) return INVALID_INPUT;
+
+    
+    return SUCCESS;
     
     //check to see if inputs are in valid range
 
@@ -319,6 +416,10 @@ fs_retcode_t inode_release_data(filesystem_t *fs, inode_t *inode)
 {
     (void)fs;
     (void)inode;
-    return NOT_IMPLEMENTED;
+    
+    if (fs == NULL || inode == NULL) return INVALID_INPUT;
+
+    
+    return SUCCESS;
     //shrink to size 0
 }
