@@ -176,7 +176,6 @@ fs_retcode_t inode_write_data(filesystem_t *fs, inode_t *inode, void *data, size
                 temp_previous_idx_dblock = temp_idx_dblock;
             }
         } else { // If all the data in Indirect data block
-            display_filesystem(fs, 0x4);
             size_t indirect_data_dblocks_in_inode = (data_dblocks_in_inode-4);
             size_t indirect_idx_dblocks_in_inode;
             
@@ -256,7 +255,6 @@ fs_retcode_t inode_write_data(filesystem_t *fs, inode_t *inode, void *data, size
 
                 temp_previous_idx_dblock = temp_idx_dblock;
             }
-            display_filesystem(fs, 0x4);
         }
     }
 
