@@ -13,7 +13,7 @@
 
 // ----------------------- UTILITY FUNCTION ----------------------- //
 
-// Debug Function for Read
+// Debug Functions
 void print_string_from_void(void* ptr) {
     if (ptr == NULL) {
         printf("Error: NULL pointer provided\n");
@@ -26,6 +26,66 @@ void print_string_from_void(void* ptr) {
     // Print the content as a string
     printf("\n\n%s\n\n", str_ptr);
 }
+
+void print_inode_data(filesystem_t *fs, inode_t *inode) {
+    if (fs == NULL || inode == NULL) {
+        fprintf(stderr, "Invalid input: filesystem or inode is NULL.\n");
+        return;
+    }
+
+    size_t file_size = inode->internal.file_size;
+    if (file_size == 0) {
+        printf("The inode has no data.\n");
+        return;
+    }
+
+    printf("Data in inode (size: %lu bytes):\n", file_size);
+
+    // Read from direct D-blocks
+    for (size_t i = 0; i < INODE_DIRECT_BLOCK_COUNT; i++) {
+        if (inode->internal.direct_data[i] == 0) break; // No more direct D-blocks
+
+        size_t block_index = inode->internal.direct_data[i];
+        char *block_data = (char *)&fs->dblocks[block_index * 64];
+
+        // Calculate how much to read from this block
+        size_t bytes_to_read = (file_size > 64) ? 64 : file_size;
+
+        // Print the data as characters
+        for (size_t j = 0; j < bytes_to_read; j++) {
+            printf("%c", block_data[j]);
+        }
+
+        file_size -= bytes_to_read;
+        if (file_size == 0) break; // All data has been read
+    }
+
+    // Handle indirect D-blocks if there is remaining data
+    if (file_size > 0 && inode->internal.indirect_dblock != 0) {
+        size_t indirect_block_index = inode->internal.indirect_dblock;
+        dblock_index_t *indirect_block = (dblock_index_t *)&fs->dblocks[indirect_block_index * 64];
+
+        for (size_t i = 0; i < 15 && file_size > 0; i++) {
+            if (indirect_block[i] == 0) break; // No more indirect D-blocks
+
+            size_t block_index = indirect_block[i];
+            char *block_data = (char *)&fs->dblocks[block_index * 64];
+
+            // Calculate how much to read from this block
+            size_t bytes_to_read = (file_size > 64) ? 64 : file_size;
+
+            // Print the data as characters
+            for (size_t j = 0; j < bytes_to_read; j++) {
+                printf("%c", block_data[j]);
+            }
+
+            file_size -= bytes_to_read;
+        }
+    }
+
+    printf("\n");
+}
+
 
 // ----------------------- CORE FUNCTION ----------------------- //
 
@@ -366,7 +426,10 @@ fs_retcode_t inode_read_data(filesystem_t *fs, inode_t *inode, size_t offset, vo
 
 fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, void *buffer, size_t n)
 {   
-    
+
+    print_inode_data(fs,inode);
+    print_string_from_void((char *)buffer);
+
     if (fs == NULL || inode == NULL) return INVALID_INPUT;
     if (offset > inode->internal.file_size) return INVALID_INPUT;
 
@@ -390,8 +453,13 @@ fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, 
     //size_t last_data_block_index = (file_size - 1) / 64; // Index of the last data block
     //size_t bytes_in_last_data_block = (file_size - 1) % 64 + 1; // Bytes in the last data block
 
+    size_t buffer_written = 0;
+
     // Manage Modifying just the Direct Datablock
     if (offset<256 && upper_bound<=256){
+        if (upper_bound > file_size){
+            upper_bound = file_size;
+        }
         size_t lower_offset_block_index = offset / 64;
         size_t upper_offset_block_index = (upper_bound - 1) / 64;  // upper_bound is exclusive
         
@@ -400,25 +468,37 @@ fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, 
 
         for (size_t i = lower_offset_block_index; i <= upper_offset_block_index; i++){
 
+            if (i == upper_offset_block_index && i == lower_offset_block_index ){
+                memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64]+bytes_in_lower_offset_block,buffer+buffer_written,upper_bound-offset);
+                buffer_written += (upper_bound-offset);
+                continue;
+            }
+
             if (i == lower_offset_block_index){
-                memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64]+bytes_in_lower_offset_block,buffer,(64-bytes_in_lower_offset_block));
-                buffer += (64-bytes_in_lower_offset_block);
+                memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64]+bytes_in_lower_offset_block,buffer+buffer_written,(64-bytes_in_lower_offset_block));
+                buffer_written += (64-bytes_in_lower_offset_block);
                 continue;
             }
 
             if (i == upper_offset_block_index){
-                memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64],buffer,bytes_in_upper_offset_block);
-                buffer += bytes_in_upper_offset_block;
+                memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64],buffer+buffer_written,bytes_in_upper_offset_block);
+                buffer_written += bytes_in_upper_offset_block;
                 continue;
             }
 
-            memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64],buffer,64);
-            buffer += 64;
+            memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64],buffer+buffer_written,64);
+            buffer_written += 64;
         }
 
+        if ((offset+n)>file_size){
+            size_t rem_data = (offset+n)-file_size;
+           inode_write_data(fs,inode,buffer,rem_data);
+        }
     }
 
+    
 
+    print_inode_data(fs,inode);
     //For the new data, call "inode_write_data" and return
     return SUCCESS;
 }
