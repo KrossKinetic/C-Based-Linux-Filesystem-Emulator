@@ -366,10 +366,6 @@ fs_retcode_t inode_read_data(filesystem_t *fs, inode_t *inode, size_t offset, vo
 
 fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, void *buffer, size_t n)
 {   
-
-    //size_t size_of_new_data = n-(file_size-offset);
-    //size_t total_dblocks_needed = calculate_necessary_dblock_amount(size_of_new_data);
-    //if (total_dblocks_needed > available_dblocks(fs)) return INSUFFICIENT_DBLOCKS;
     
     if (fs == NULL || inode == NULL) return INVALID_INPUT;
     if (offset > inode->internal.file_size) return INVALID_INPUT;
@@ -377,6 +373,9 @@ fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, 
     //calculate the final filesize and verify there are enough blocks to support it
     size_t file_size = inode->internal.file_size;
     size_t upper_bound = offset+n; // Exclusive
+
+    if (((upper_bound-file_size)/64 > available_dblocks(fs)) && file_size<256) return INSUFFICIENT_DBLOCKS; // When assigning blocks to direct block
+    if ((calculate_necessary_dblock_amount((upper_bound-file_size)) > available_dblocks(fs)) && file_size>256 && upper_bound>256) return INSUFFICIENT_DBLOCKS; // When assigning blocks to direct block
 
     if (offset > file_size){ // If offset is larger, just append data
         inode_write_data(fs,inode,buffer,n);
@@ -417,11 +416,6 @@ fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, 
             buffer += 64;
         }
 
-        if (upper_bound>file_size){
-            size_t data_left_to_write = upper_bound-file_size;
-            printf("Value is %lu",data_left_to_write);
-            //inode_write_data(fs,inode,buffer,data_left_to_write);
-        }
     }
 
 
