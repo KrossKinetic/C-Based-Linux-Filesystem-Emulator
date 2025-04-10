@@ -361,33 +361,72 @@ fs_retcode_t inode_read_data(filesystem_t *fs, inode_t *inode, size_t offset, vo
         memcpy(&idx_next_indirect_dblock, &fs->dblocks[idx_next_indirect_dblock*64] + 60, 4);
     }
     
-    print_string_from_void(buffer);
     return SUCCESS;
 }
 
 fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, void *buffer, size_t n)
-{
-    (void)fs;
-    (void)inode;
-    (void)offset;
-    (void)buffer;
-    (void)n;
+{   
+
+    //size_t size_of_new_data = n-(file_size-offset);
+    //size_t total_dblocks_needed = calculate_necessary_dblock_amount(size_of_new_data);
+    //if (total_dblocks_needed > available_dblocks(fs)) return INSUFFICIENT_DBLOCKS;
     
     if (fs == NULL || inode == NULL) return INVALID_INPUT;
     if (offset > inode->internal.file_size) return INVALID_INPUT;
 
-    
-    return SUCCESS;
-
-    //check to see if the input is valid
-
     //calculate the final filesize and verify there are enough blocks to support it
-    //use calculate_necessary_dblock_amount and available_dblocks
+    size_t file_size = inode->internal.file_size;
+    size_t upper_bound = offset+n; // Exclusive
 
+    if (offset > file_size){ // If offset is larger, just append data
+        inode_write_data(fs,inode,buffer,n);
+        return SUCCESS;
+    };
 
+    printf("Lower= %lu\n",offset);
+    printf("Upper= %lu\n",upper_bound);
+    printf("File Size= %lu\n",file_size);
     //Write to existing data in your inode
 
+    //size_t last_data_block_index = (file_size - 1) / 64; // Index of the last data block
+    //size_t bytes_in_last_data_block = (file_size - 1) % 64 + 1; // Bytes in the last data block
+
+    // Manage Modifying just the Direct Datablock
+    if (offset<256 && upper_bound<=256){
+        size_t lower_offset_block_index = offset / 64;
+        size_t upper_offset_block_index = (upper_bound - 1) / 64;  // upper_bound is exclusive
+        
+        size_t bytes_in_lower_offset_block = offset % 64;          // Starting byte in first block
+        size_t bytes_in_upper_offset_block = (upper_bound - 1) % 64 + 1;  // Bytes to write in last block        
+
+        for (size_t i = lower_offset_block_index; i <= upper_offset_block_index; i++){
+
+            if (i == lower_offset_block_index){
+                memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64]+bytes_in_lower_offset_block,buffer,(64-bytes_in_lower_offset_block));
+                buffer += (64-bytes_in_lower_offset_block);
+                continue;
+            }
+
+            if (i == upper_offset_block_index){
+                memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64],buffer,bytes_in_upper_offset_block);
+                buffer += bytes_in_upper_offset_block;
+                continue;
+            }
+
+            memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64],buffer,64);
+            buffer += 64;
+        }
+
+        if (upper_bound>file_size){
+            size_t data_left_to_write = upper_bound-file_size;
+            printf("Value is %lu",data_left_to_write);
+            //inode_write_data(fs,inode,buffer,data_left_to_write);
+        }
+    }
+
+
     //For the new data, call "inode_write_data" and return
+    return SUCCESS;
 }
 
 fs_retcode_t inode_shrink_data(filesystem_t *fs, inode_t *inode, size_t new_size)
