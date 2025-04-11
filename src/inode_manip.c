@@ -701,26 +701,32 @@ fs_retcode_t inode_shrink_data(filesystem_t *fs, inode_t *inode, size_t new_size
         }
     } else {
         size_t new_offset = new_size-256;
-        size_t new_file_size = inode->internal.file_size-256;
         size_t new_offset_index_dblock = calculate_index_dblock_amount(new_offset);
         size_t original_index_dblock = calculate_index_dblock_amount(inode->internal.file_size-256);
 
         if (new_offset_index_dblock != original_index_dblock){
             free_indirect(fs,inode,new_offset);
         } else {
-            size_t new_offset_data_dblocks = (calculate_necessary_dblock_amount(new_offset) - new_offset_index_dblock)%15;
-            size_t og_data_dblocks = (calculate_necessary_dblock_amount(new_file_size) - original_index_dblock)%15;
+            size_t size_of_indirect = inode->internal.file_size-256;
+            size_t data_dblocks_of_indirect = (size_of_indirect)/64;
+
+            size_t offset_dblocks = ((new_offset+63)/64);            
 
             dblock_index_t cur_index = inode->internal.indirect_dblock;
-            
-            for (size_t i = 0; i < new_offset_index_dblock; i++){
-                memcpy(&cur_index,&fs->dblocks[cur_index*64]+60,4);
-            }
 
-            for (size_t i = new_offset_data_dblocks; i < og_data_dblocks; i++){
-                //dblock_index_t cur_dblock_idx;
-                //memcpy(&cur_dblock_idx,&fs->dblocks[cur_index*64]+i*4,4);
-                //release_dblock(fs,&fs->dblocks[cur_dblock_idx*64]);
+            size_t data_dblocks_read = 0;
+            for (size_t i = 0; i < calculate_index_dblock_amount(size_of_indirect); i++){
+                for (size_t i = 0; i<15 && data_dblocks_read<data_dblocks_of_indirect; i++){
+                    if (data_dblocks_read < offset_dblocks) {
+                        data_dblocks_read++;
+                        continue;
+                    }
+                    dblock_index_t cur_dblock_idx;
+                    memcpy(&cur_dblock_idx,&fs->dblocks[cur_index*64]+i*4,4);
+                    release_dblock(fs,&fs->dblocks[cur_dblock_idx*64]);
+                    data_dblocks_read++;
+                }
+                memcpy(&cur_index,&fs->dblocks[cur_index*64]+60,4);
             }
         }
     }
@@ -728,8 +734,6 @@ fs_retcode_t inode_shrink_data(filesystem_t *fs, inode_t *inode, size_t new_size
     inode->internal.file_size = new_size;
     return SUCCESS;
 }
-
-
 
 // make new_size to 0
 fs_retcode_t inode_release_data(filesystem_t *fs, inode_t *inode)
