@@ -86,6 +86,79 @@ void print_inode_data(filesystem_t *fs, inode_t *inode) {
     printf("\n");
 }
 
+void print_dblock_data(filesystem_t *fs, dblock_index_t dblock_index) {
+    if (fs == NULL) {
+        fprintf(stderr, "Error: Filesystem is NULL.\n");
+        return;
+    }
+
+    // Ensure the D-block index is within range
+    if (dblock_index >= fs->dblock_count) {
+        fprintf(stderr, "Error: D-block index %u is out of range (max: %lu).\n", 
+                dblock_index, fs->dblock_count - 1);
+        return;
+    }
+
+    // Get a pointer to the start of the D-block
+    char *dblock_start = (char *)&fs->dblocks[dblock_index * 64];
+
+    // Print the contents of the D-block as characters
+    printf("Contents of D-block %u:\n", dblock_index);
+    for (size_t i = 0; i < 64; i++) {
+        char c = dblock_start[i];
+        if (c >= 32 && c <= 126) { // Printable ASCII range
+            printf("%c", c);
+        } else {
+            printf("."); // Non-printable characters are shown as '.'
+        }
+    }
+    printf("\n");
+}
+
+void free_indirect(filesystem_t *fs, inode_t *inode, size_t offset){
+    size_t size_of_indirect = inode->internal.file_size-256;
+    size_t data_dblocks_of_indirect = (size_of_indirect)/64;
+
+    size_t offset_dblocks = ((offset+63)/64);
+
+    size_t consider_offset = 0;
+
+    if (offset>0){
+        consider_offset = 1;
+    }
+    
+
+    dblock_index_t cur_index = inode->internal.indirect_dblock;
+
+    size_t data_dblocks_read = 0;
+
+    size_t is_first = 0;
+
+    // free all indirect index dblock first
+    for (size_t i = 0; i < calculate_index_dblock_amount(size_of_indirect); i++){
+        for (size_t i = 0; i<15 && data_dblocks_read<data_dblocks_of_indirect; i++){
+            if (data_dblocks_read < offset_dblocks) {
+                data_dblocks_read++;
+                continue;
+            }
+            dblock_index_t cur_dblock_idx;
+            memcpy(&cur_dblock_idx,&fs->dblocks[cur_index*64]+i*4,4);
+            release_dblock(fs,&fs->dblocks[cur_dblock_idx*64]);
+            data_dblocks_read++;
+        }
+
+        if (consider_offset == 0){
+            release_dblock(fs,&fs->dblocks[cur_index*64]);       
+        } else {
+            if (is_first == 0){
+                is_first = 1;
+            } else {
+                release_dblock(fs,&fs->dblocks[cur_index*64]);  
+            }
+        }
+        memcpy(&cur_index,&fs->dblocks[cur_index*64]+60,4);
+    }
+}
 
 // ----------------------- CORE FUNCTION ----------------------- //
 
@@ -95,11 +168,6 @@ void write_to_dblock(filesystem_t *fs, dblock_index_t dblock_idx, size_t offset_
 
 fs_retcode_t inode_write_data(filesystem_t *fs, inode_t *inode, void *data, size_t n)
 {
-    (void)fs; // FileSystem
-    (void)inode; // This is where you write to
-    (void)n; // Number of bytes to write
-    (void)data; // Data to write from
-
     //Check for valid input
     if (fs == NULL || inode == NULL){return INVALID_INPUT;}
     if (n == 0){return SUCCESS;} 
@@ -426,10 +494,6 @@ fs_retcode_t inode_read_data(filesystem_t *fs, inode_t *inode, size_t offset, vo
 
 fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, void *buffer, size_t n)
 {   
-
-    print_inode_data(fs,inode);
-    print_string_from_void((char *)buffer);
-
     if (fs == NULL || inode == NULL) return INVALID_INPUT;
     if (offset > inode->internal.file_size) return INVALID_INPUT;
 
@@ -438,25 +502,27 @@ fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, 
     size_t upper_bound = offset+n; // Exclusive
 
     if (((upper_bound-file_size)/64 > available_dblocks(fs)) && file_size<256) return INSUFFICIENT_DBLOCKS; // When assigning blocks to direct block
-    if ((calculate_necessary_dblock_amount((upper_bound-file_size)) > available_dblocks(fs)) && file_size>256 && upper_bound>256) return INSUFFICIENT_DBLOCKS; // When assigning blocks to direct block
+
+
+    size_t indirect_bytes = upper_bound-256;
+    size_t indirect_file_size = file_size-256;
+
+    size_t ib_index_blocks = calculate_index_dblock_amount(indirect_bytes);
+    size_t ifz_index_blocks = calculate_index_dblock_amount(indirect_file_size);
+
+    if (ifz_index_blocks<ib_index_blocks){
+        if ((ib_index_blocks-ifz_index_blocks)>available_dblocks(fs)) return INSUFFICIENT_DBLOCKS;
+    }
 
     if (offset > file_size){ // If offset is larger, just append data
         inode_write_data(fs,inode,buffer,n);
         return SUCCESS;
     };
 
-    printf("Lower= %lu\n",offset);
-    printf("Upper= %lu\n",upper_bound);
-    printf("File Size= %lu\n",file_size);
-    //Write to existing data in your inode
-
-    //size_t last_data_block_index = (file_size - 1) / 64; // Index of the last data block
-    //size_t bytes_in_last_data_block = (file_size - 1) % 64 + 1; // Bytes in the last data block
-
     size_t buffer_written = 0;
 
     // Manage Modifying just the Direct Datablock
-    if (offset<256 && upper_bound<=256){
+    if (offset<256 && upper_bound<256){
         if (upper_bound > file_size){
             upper_bound = file_size;
         }
@@ -489,50 +555,186 @@ fs_retcode_t inode_modify_data(filesystem_t *fs, inode_t *inode, size_t offset, 
             memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64],buffer+buffer_written,64);
             buffer_written += 64;
         }
+    } else if (offset<256 && upper_bound>=256){
+        
+        size_t indirect_bytes = upper_bound-256;
 
-        if ((offset+n)>file_size){
-            size_t rem_data = (offset+n)-file_size;
-           inode_write_data(fs,inode,buffer,rem_data);
+        size_t lower_offset_block_index = offset / 64;
+        size_t bytes_in_lower_offset_block = offset % 64;    
+
+        for (size_t i = lower_offset_block_index; i <= 3; i++){
+            memcpy(&fs->dblocks[(inode->internal.direct_data[i])*64]+bytes_in_lower_offset_block,buffer+buffer_written,(64-bytes_in_lower_offset_block));
+            buffer_written += (64-bytes_in_lower_offset_block);
+            bytes_in_lower_offset_block = 0;    
+        }
+
+        if (file_size == 256){
+            inode_write_data(fs,inode,buffer,((offset+n)-256));
+            return SUCCESS;
+        }
+
+        if (indirect_bytes > (file_size-256)){
+            indirect_bytes = file_size;
+        }
+
+        size_t upper_bound_indirect_data_block = (indirect_bytes - 1) / 64; 
+        size_t upper_bound_bytes = (indirect_bytes - 1) % 64 + 1;
+
+        size_t data_dblocks_read = 0;
+        size_t data_dblocks_per_idx_read = 0;
+
+        dblock_index_t cur_index = inode->internal.indirect_dblock;
+
+        while (data_dblocks_read <= upper_bound_indirect_data_block){
+            size_t idx_of_data_dblock = 0;
+            memcpy(&idx_of_data_dblock,&fs->dblocks[cur_index*64]+data_dblocks_per_idx_read*4,4);
+
+            if (data_dblocks_read == upper_bound_indirect_data_block){
+                memcpy(&fs->dblocks[idx_of_data_dblock*64],buffer+buffer_written,upper_bound_bytes);
+                buffer_written += upper_bound_bytes;
+                data_dblocks_read++;
+                data_dblocks_per_idx_read++;
+                continue;
+            }
+
+            if (data_dblocks_read < (upper_bound_indirect_data_block)){
+                memcpy(&fs->dblocks[idx_of_data_dblock*64],buffer+buffer_written,64);
+                buffer_written += 64;
+            }
+
+            data_dblocks_read++;
+            data_dblocks_per_idx_read++;
+
+            if (data_dblocks_read%15 == 0){
+                memcpy(&cur_index,&fs->dblocks[cur_index*64]+60,4);
+                data_dblocks_per_idx_read = 0;
+            }
+        }
+    } else {
+        size_t indirect_bytes = upper_bound-256;
+
+        
+        size_t total_data_dblocks = ((offset-256) / 64);
+        size_t lower_offset_data_dblock_index = total_data_dblocks%15;
+        size_t bytes_in_lower_offset_block = (offset-256) % 64;    
+
+        size_t upper_bound_indirect_data_block = (indirect_bytes - 1) / 64; 
+        size_t upper_bound_bytes = (indirect_bytes - 1) % 64 + 1;
+
+        size_t data_dblocks_read = total_data_dblocks;
+        size_t data_dblocks_per_idx_read = lower_offset_data_dblock_index;
+
+        dblock_index_t cur_index = inode->internal.indirect_dblock;
+
+        for (size_t i = 0; i < calculate_index_dblock_amount(total_data_dblocks); i++){
+            memcpy(&cur_index,&fs->dblocks[cur_index*64]+60,4);
+        }
+
+        while (data_dblocks_read <= upper_bound_indirect_data_block){
+            size_t idx_of_data_dblock = 0;
+            memcpy(&idx_of_data_dblock,&fs->dblocks[cur_index*64]+data_dblocks_per_idx_read*4,4);
+
+            if (data_dblocks_read == upper_bound_indirect_data_block){
+                memcpy(&fs->dblocks[idx_of_data_dblock*64]+bytes_in_lower_offset_block,buffer+buffer_written,upper_bound_bytes-bytes_in_lower_offset_block);
+                buffer_written += upper_bound_bytes-bytes_in_lower_offset_block;
+                data_dblocks_read++;
+                data_dblocks_per_idx_read++;
+                bytes_in_lower_offset_block = 0;
+                continue;
+            }
+
+            if (data_dblocks_read < (upper_bound_indirect_data_block)){
+                memcpy(&fs->dblocks[idx_of_data_dblock*64]+bytes_in_lower_offset_block,buffer+buffer_written,64-bytes_in_lower_offset_block);
+                buffer_written += 64-bytes_in_lower_offset_block;
+                bytes_in_lower_offset_block = 0;
+            }
+
+            data_dblocks_read++;
+            data_dblocks_per_idx_read++;
+
+            if (data_dblocks_read%15 == 0){
+                memcpy(&cur_index,&fs->dblocks[cur_index*64]+60,4);
+                data_dblocks_per_idx_read = 0;
+            }
         }
     }
 
+    if ((offset+n)>file_size){
+        size_t rem_data = (offset+n)-file_size;
+        inode_write_data(fs,inode,buffer,rem_data);
+    }
     
-
-    print_inode_data(fs,inode);
     //For the new data, call "inode_write_data" and return
     return SUCCESS;
 }
 
 fs_retcode_t inode_shrink_data(filesystem_t *fs, inode_t *inode, size_t new_size)
 {
-    (void)fs;
-    (void)inode;
-    (void)new_size;
-    if (fs == NULL || inode == NULL) return INVALID_INPUT;
 
-    
-    return SUCCESS;
-    
-    //check to see if inputs are in valid range
+    if (fs == NULL || inode == NULL) return INVALID_INPUT;
+    if (new_size>inode->internal.file_size) return INVALID_INPUT;
 
     //Calculate how many blocks to remove
 
-    //helper function to free all indirect blocks
+    if (new_size==0){
+        size_t index_to_clear_to = (inode->internal.file_size/64);
+        for (size_t i = 0; i <= index_to_clear_to && i < 4; i++){
+            release_dblock(fs,&fs->dblocks[inode->internal.direct_data[i]*64]);
+        }
 
-    //remove the remaining direct dblocks
+        if (index_to_clear_to>=4){
+            free_indirect(fs,inode,0);
+        }
+        inode->internal.file_size = 0;
+        return SUCCESS;
+    }
 
-    //update filesize and return
+    if (new_size<256){
+        size_t index_to_clear_to = (inode->internal.file_size/64);
+        size_t index_to_clear_from = (new_size/64)+1;
+        for (size_t i = index_to_clear_from; i <= index_to_clear_to && i < 4; i++){
+            release_dblock(fs,&fs->dblocks[inode->internal.direct_data[i]*64]);
+        }
+
+        if (index_to_clear_to>=4){
+            free_indirect(fs,inode,0);
+        }
+    } else {
+        size_t new_offset = new_size-256;
+        size_t new_file_size = inode->internal.file_size-256;
+        size_t new_offset_index_dblock = calculate_index_dblock_amount(new_offset);
+        size_t original_index_dblock = calculate_index_dblock_amount(inode->internal.file_size-256);
+
+        if (new_offset_index_dblock != original_index_dblock){
+            free_indirect(fs,inode,new_offset);
+        } else {
+            size_t new_offset_data_dblocks = (calculate_necessary_dblock_amount(new_offset) - new_offset_index_dblock)%15;
+            size_t og_data_dblocks = (calculate_necessary_dblock_amount(new_file_size) - original_index_dblock)%15;
+
+            dblock_index_t cur_index = inode->internal.indirect_dblock;
+            
+            for (size_t i = 0; i < new_offset_index_dblock; i++){
+                memcpy(&cur_index,&fs->dblocks[cur_index*64]+60,4);
+            }
+
+            for (size_t i = new_offset_data_dblocks; i < og_data_dblocks; i++){
+                //dblock_index_t cur_dblock_idx;
+                //memcpy(&cur_dblock_idx,&fs->dblocks[cur_index*64]+i*4,4);
+                //release_dblock(fs,&fs->dblocks[cur_dblock_idx*64]);
+            }
+        }
+    }
+
+    inode->internal.file_size = new_size;
+    return SUCCESS;
 }
+
+
 
 // make new_size to 0
 fs_retcode_t inode_release_data(filesystem_t *fs, inode_t *inode)
 {
-    (void)fs;
-    (void)inode;
-    
     if (fs == NULL || inode == NULL) return INVALID_INPUT;
-
-    
+    inode_shrink_data(fs,inode,0);
     return SUCCESS;
-    //shrink to size 0
 }
