@@ -194,6 +194,126 @@ int verify_path(char *path, inode_t* dir, filesystem_t* fs){
     return 1;
 }
 
+inode_t* return_inode_v2(char *path, inode_t* dir, filesystem_t* fs){
+    int slashes = count_char_occurrences(path,'/');
+    char * token = strtok(path, "/");
+    char formatted_name[14];
+    format_token_for_comparison(token,formatted_name);
+    inode_t *cur_inode = dir;
+    int is_file = 0;
+    size_t bytes_read = 0;
+    while(token != NULL && slashes>=0) {
+        
+        if (slashes == 1){
+            is_file = 1;
+        }
+        
+        byte *all_data = malloc(cur_inode->internal.file_size);
+        inode_read_data(fs,cur_inode,0,all_data,cur_inode->internal.file_size,&bytes_read);
+        byte *original_ptr = all_data;
+        for (size_t i = 0; i < (bytes_read)/16; i++){
+            inode_index_t inode_inside_idx;
+            memcpy(&inode_inside_idx,all_data,2);
+            all_data += 2;
+
+            char name_of_inode[14];
+            memcpy(name_of_inode, all_data, 14);
+            format_filename(name_of_inode);
+            all_data+=14;
+
+            if (is_file == 0){
+                if (strcmp(formatted_name,name_of_inode) == 0){
+                    inode_t *next_inode = &fs->inodes[inode_inside_idx];
+                    cur_inode = next_inode;
+                    break;
+                }
+            } else {
+                if (strcmp(formatted_name,name_of_inode) == 0){
+                    inode_t *next_inode = &fs->inodes[inode_inside_idx];
+                    return next_inode;
+                }
+            }
+
+        }
+        format_token_for_comparison(strtok(NULL, "/"),formatted_name);
+        free(original_ptr);
+        slashes--;
+    }
+    return NULL;
+}
+
+int verify_path_v2(char *path, inode_t* dir, filesystem_t* fs){
+    int slashes = count_char_occurrences(path,'/');
+    
+    char * token = strtok(path, "/");
+    char formatted_name[14];
+    format_token_for_comparison(token,formatted_name);
+    
+    inode_t *cur_inode = dir;
+    
+    int is_file = 0;
+    int file_found = 0;
+
+    size_t bytes_read = 0;
+
+    //int count = 0;
+    while(token != NULL && slashes>=0) {
+
+        if (slashes == 0){
+            is_file = 1;
+        }
+
+        byte *all_data = malloc(cur_inode->internal.file_size);
+        inode_read_data(fs,cur_inode,0,all_data,cur_inode->internal.file_size,&bytes_read);
+        byte *original_ptr = all_data;
+
+        for (size_t i = 0; i < (bytes_read)/16; i++){
+            inode_index_t inode_inside_idx;
+            memcpy(&inode_inside_idx,all_data,2);
+            all_data += 2;
+
+            char name_of_inode[14];
+            memcpy(name_of_inode, all_data, 14);
+            format_filename(name_of_inode);
+            all_data+=14;
+
+            if (is_file == 0){
+                if (strcmp(formatted_name,name_of_inode) == 0){
+                    inode_t *next_inode = &fs->inodes[inode_inside_idx];
+                    if (next_inode->internal.file_type == DIRECTORY){
+                        cur_inode = next_inode;
+                        file_found = 1;
+                        break;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            } else {
+                if (strcmp(formatted_name,name_of_inode) == 0){
+                   REPORT_RETCODE(FILE_EXIST);
+                   return 0;
+                }
+            }
+
+        }
+
+        if (file_found == 0 && is_file == 0){
+            REPORT_RETCODE(DIR_NOT_FOUND);
+            return 0;
+        } 
+
+        format_token_for_comparison(strtok(NULL, "/"),formatted_name);
+
+        free(original_ptr);
+        slashes--;
+        file_found = 0;
+    }
+    return 1;
+}
+
+
 // ----------------------- CORE FUNCTION ----------------------- //
 int new_file(terminal_context_t *context, char *path, permission_t perms)
 {
@@ -202,15 +322,103 @@ int new_file(terminal_context_t *context, char *path, permission_t perms)
         return 0;
     } 
 
-    if (verify_path(path,context->working_directory,context->fs) == 0){
+    if (verify_path_v2(path,context->working_directory,context->fs) == 0){
         return -1;
     }
 
     inode_index_t new_inode_idx;
+
+    fprintf(stderr,"path= %s",path);
     
     if (claim_available_inode(context->fs, &new_inode_idx) != SUCCESS) {
         REPORT_RETCODE(INODE_UNAVAILABLE);
         return -1;
+    }
+
+    inode_t* new_inode = &context->fs->inodes[new_inode_idx];
+    inode_t *cur_inode;
+
+    if (count_char_occurrences(path,'/') == 0){
+        cur_inode = context->working_directory;
+    } else {
+        cur_inode = return_inode_v2(path,context->working_directory,context->fs);
+    }
+
+    new_inode->internal.file_type = DATA_FILE;
+    new_inode->internal.file_perms = perms;
+
+    char* basename = strrchr(path, '/');
+    
+    if (basename == NULL) {
+        basename = path;
+    } else {
+        basename++;
+    }
+    
+    size_t name_len = strlen(basename);
+    if (name_len > 14) {
+        name_len = 14;
+    }
+    memcpy(new_inode->internal.file_name, basename, name_len);
+    if (name_len < 14) {
+        new_inode->internal.file_name[name_len] = '\0';
+    }
+
+    // Initialize file size to 0 (empty file)
+    new_inode->internal.file_size = 0;
+
+    // Initialize data blocks
+    for (int i = 0; i < INODE_DIRECT_BLOCK_COUNT; i++) {
+        new_inode->internal.direct_data[i] = 0;
+    }
+    new_inode->internal.indirect_dblock = 0;
+
+    // Create directory entry (16 bytes: 2 for inode index, 14 for filename)
+    typedef struct {
+        inode_index_t inode_idx;  // 2 bytes
+        char name[14];           // 14 bytes
+    } dir_entry_t;
+
+    dir_entry_t new_entry;
+    new_entry.inode_idx = new_inode_idx;
+
+    // Copy the filename (same truncation rules)
+    memcpy(new_entry.name, basename, name_len >= 14 ? 14 : name_len);
+    if (name_len < 14) {
+        new_entry.name[name_len] = '\0';
+    }
+
+    // Search for a tombstone in the directory
+    size_t offset = 0;
+    size_t entry_size = sizeof(dir_entry_t);  // 16 bytes
+    dir_entry_t temp_entry;
+    size_t bytes_read;
+    int found_tombstone = 0;  // Using int instead of bool (0 = false)
+
+    while (offset < cur_inode->internal.file_size) {
+        if (inode_read_data(context->fs, cur_inode, offset, 
+                        &temp_entry, entry_size, &bytes_read) != SUCCESS || 
+            bytes_read != entry_size) {
+            break;
+        }
+        
+        int is_tombstone = 1;
+        for (size_t i = 0; i < entry_size; i++) {
+            if (((char*)&temp_entry)[i] != 0) {
+                is_tombstone = 0;  // Not a tombstone
+                break;
+            }
+        }
+        if (is_tombstone) {
+            found_tombstone = 1;
+            break;
+        }
+        offset += entry_size;
+    }
+    if (found_tombstone) {
+        inode_modify_data(context->fs, cur_inode, offset, &new_entry, entry_size);
+    } else {
+        inode_write_data(context->fs, cur_inode, &new_entry, entry_size);
     }
 
 
