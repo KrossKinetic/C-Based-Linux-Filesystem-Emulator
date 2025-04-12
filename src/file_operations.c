@@ -8,6 +8,19 @@
 #define DIRECTORY_ENTRIES_PER_DATABLOCK (DATA_BLOCK_SIZE / DIRECTORY_ENTRY_SIZE)
 
 // ----------------------- HELPER FUNCTION --------------------- //
+void print_string_from_void(void* ptr) {
+    if (ptr == NULL) {
+        printf("Error: NULL pointer provided\n");
+        return;
+    }
+    
+    // Cast the void pointer to a char pointer
+    char* str_ptr = (char*)ptr;
+    
+    // Print the content as a string
+    printf("\n\n%s\n\n", str_ptr);
+}
+
 
 void format_token_for_comparison(char* token, char formatted_name[14]) {
     if (token == NULL) {
@@ -284,15 +297,30 @@ void fs_close(fs_file_t file)
 
 size_t fs_read(fs_file_t file, void *buffer, size_t n)
 {
+    if (file == NULL) return 0;
     (void)file;
     (void)buffer;
     (void)n;
 
-    return -2;
+    size_t offset = file->offset;
+    size_t file_size = file->inode->internal.file_size;
+    size_t bytes_read = 0;
+    inode_read_data(file->fs, file->inode, file->offset, buffer, n, &bytes_read);
+
+    if ((offset+n) > file_size){
+        bytes_read = file_size-offset;
+    }
+
+    file->offset += bytes_read;
+
+    //print_string_from_void(buffer);
+    
+    return bytes_read;
 }
 
 size_t fs_write(fs_file_t file, void *buffer, size_t n)
 {
+    if (file == NULL) return 0;
     (void)file;
     (void)buffer;
     (void)n;
@@ -302,6 +330,7 @@ size_t fs_write(fs_file_t file, void *buffer, size_t n)
 
 int fs_seek(fs_file_t file, seek_mode_t seek_mode, int offset)
 {
+    if (file == NULL) return -1;
     (void)file;
     (void)seek_mode;
     (void)offset;

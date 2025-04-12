@@ -14,19 +14,6 @@
 // ----------------------- UTILITY FUNCTION ----------------------- //
 
 // Debug Functions
-void print_string_from_void(void* ptr) {
-    if (ptr == NULL) {
-        printf("Error: NULL pointer provided\n");
-        return;
-    }
-    
-    // Cast the void pointer to a char pointer
-    char* str_ptr = (char*)ptr;
-    
-    // Print the content as a string
-    printf("\n\n%s\n\n", str_ptr);
-}
-
 void print_inode_data(filesystem_t *fs, inode_t *inode) {
     if (fs == NULL || inode == NULL) {
         fprintf(stderr, "Invalid input: filesystem or inode is NULL.\n");
@@ -468,6 +455,8 @@ fs_retcode_t inode_read_data(filesystem_t *fs, inode_t *inode, size_t offset, vo
         while (dblock_counter<15 && data_dblocks_to_read>0){
 
             if (total_dblock_counter < offset_data_dblocks_to_read){
+                dblock_counter++;
+                total_dblock_counter++;
                 continue;
             }
 
@@ -488,7 +477,6 @@ fs_retcode_t inode_read_data(filesystem_t *fs, inode_t *inode, size_t offset, vo
         }
         memcpy(&idx_next_indirect_dblock, &fs->dblocks[idx_next_indirect_dblock*64] + 60, 4);
     }
-    
     return SUCCESS;
 }
 
