@@ -21,7 +21,6 @@ void print_string_from_void(void* ptr) {
     fprintf(stderr,"\n%s\n", str_ptr);
 }
 
-
 void format_token_for_comparison(char* token, char formatted_name[14]) {
     if (token == NULL) {
         memset(formatted_name, 0, 14);
@@ -198,9 +197,7 @@ int verify_path(char *path, inode_t* dir, filesystem_t* fs){
 // ----------------------- CORE FUNCTION ----------------------- //
 int new_file(terminal_context_t *context, char *path, permission_t perms)
 {
-    (void) context;
-    (void) path;
-    (void) perms;
+    
     return -2;
 }
 
