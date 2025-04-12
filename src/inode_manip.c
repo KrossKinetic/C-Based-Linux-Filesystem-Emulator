@@ -426,7 +426,7 @@ fs_retcode_t inode_read_data(filesystem_t *fs, inode_t *inode, size_t offset, vo
 
     } else {
         offset = offset - 256;
-        bytes_to_read_indirect_dblock = n;
+        bytes_to_read_indirect_dblock = bytes_to_read;
     }
 
     if (size_of_inode<=256 || bytes_to_read == *bytes_read){
@@ -454,7 +454,7 @@ fs_retcode_t inode_read_data(filesystem_t *fs, inode_t *inode, size_t offset, vo
 
         while (dblock_counter<15 && data_dblocks_to_read>0){
 
-            if (total_dblock_counter < offset_data_dblocks_to_read){
+            if ((total_dblock_counter < offset_data_dblocks_to_read-1) && ((offset+bytes_to_read)%64 == (size_of_inode-256)%64) && (offset != 0)){
                 dblock_counter++;
                 total_dblock_counter++;
                 continue;

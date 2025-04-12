@@ -10,7 +10,7 @@
 // ----------------------- HELPER FUNCTION --------------------- //
 void print_string_from_void(void* ptr) {
     if (ptr == NULL) {
-        printf("Error: NULL pointer provided\n");
+        fprintf(stderr,"Error: NULL pointer provided\n");
         return;
     }
     
@@ -18,7 +18,7 @@ void print_string_from_void(void* ptr) {
     char* str_ptr = (char*)ptr;
     
     // Print the content as a string
-    printf("\n\n%s\n\n", str_ptr);
+    fprintf(stderr,"\n%s\n", str_ptr);
 }
 
 
@@ -312,8 +312,6 @@ size_t fs_read(fs_file_t file, void *buffer, size_t n)
     }
 
     file->offset += bytes_read;
-
-    //print_string_from_void(buffer);
     
     return bytes_read;
 }
@@ -321,20 +319,52 @@ size_t fs_read(fs_file_t file, void *buffer, size_t n)
 size_t fs_write(fs_file_t file, void *buffer, size_t n)
 {
     if (file == NULL) return 0;
-    (void)file;
-    (void)buffer;
-    (void)n;
 
-    return -2;
+    fs_retcode_t ret = inode_modify_data(file->fs, file->inode, file->offset, buffer, n);
+    
+    if (ret != SUCCESS) {
+        return 0;  // Return 0 bytes written
+    }
+    
+    file->offset += n;
+    
+    return n;  // Return the number of bytes written
 }
 
 int fs_seek(fs_file_t file, seek_mode_t seek_mode, int offset)
 {
     if (file == NULL) return -1;
-    (void)file;
-    (void)seek_mode;
-    (void)offset;
+    if (seek_mode>4) return -1;
 
-    return -2;
+    long new_offset = 0; 
+    size_t file_size = file->inode->internal.file_size;
+
+    // Calculate new position based on seek mode
+    if (seek_mode == FS_SEEK_START) {
+        new_offset = offset;
+    } else if (seek_mode == FS_SEEK_CURRENT) {
+        new_offset = (long)file->offset + offset;
+    } else if (seek_mode == FS_SEEK_END) {
+        if (offset<=0){
+            offset = offset*-1;
+            new_offset = (long)file_size - offset;
+        } else {
+            new_offset = file_size;
+        }
+    } else {
+        return -1;
+    }
+
+    if (new_offset < 0) {
+        return -1;
+    }
+
+    if ((size_t)new_offset > file_size) {
+        file->offset = file_size;
+    } else {
+        file->offset = (size_t)new_offset;
+    }
+
+    return 0; // Success
 }
 
