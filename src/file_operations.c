@@ -197,21 +197,40 @@ int verify_path(char *path, inode_t* dir, filesystem_t* fs){
 // ----------------------- CORE FUNCTION ----------------------- //
 int new_file(terminal_context_t *context, char *path, permission_t perms)
 {
+
+    if (context == NULL || path == NULL){
+        return 0;
+    } 
+
+    if (verify_path(path,context->working_directory,context->fs) == 0){
+        return -1;
+    }
+
+    inode_index_t new_inode_idx;
     
-    return -2;
+    if (claim_available_inode(context->fs, &new_inode_idx) != SUCCESS) {
+        REPORT_RETCODE(INODE_UNAVAILABLE);
+        return -1;
+    }
+
+
+
+    return 0;
 }
 
 int new_directory(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
+    if (context == NULL || path == NULL){
+        return 0;
+    } 
     return -2;
 }
 
 int remove_file(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
+    if (context == NULL || path == NULL){
+        return 0;
+    } 
     return -2;
 }
 
@@ -225,29 +244,37 @@ int remove_directory(terminal_context_t *context, char *path)
 
 int change_directory(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
+    if (context == NULL || path == NULL){
+        return 0;
+    } 
     return -2;
 }
 
 int list(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
+    if (context == NULL || path == NULL){
+        return 0;
+    } 
     return -2;
 }
 
 char *get_path_string(terminal_context_t *context)
 {
-    (void) context;
+    if (context == NULL){
+        char *temp = malloc(1 * sizeof(char));
+        temp[0] = '\0'; 
+        return temp;
+    } 
 
     return NULL;
 }
 
 int tree(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
+    if (context == NULL || path == NULL){
+        return 0;
+    } 
+
     return -2;
 }
 
