@@ -355,75 +355,7 @@ int new_file(terminal_context_t *context, char *path, permission_t perms)
         basename++;
     }
     
-    size_t name_len = strlen(basename);
-    if (name_len > 14) {
-        name_len = 14;
-    }
-    memcpy(new_inode->internal.file_name, basename, name_len);
-    if (name_len < 14) {
-        new_inode->internal.file_name[name_len] = '\0';
-    }
-
-    // Initialize file size to 0 (empty file)
-    new_inode->internal.file_size = 0;
-
-    // Initialize data blocks
-    for (int i = 0; i < INODE_DIRECT_BLOCK_COUNT; i++) {
-        new_inode->internal.direct_data[i] = 0;
-    }
-    new_inode->internal.indirect_dblock = 0;
-
-    // Create directory entry (16 bytes: 2 for inode index, 14 for filename)
-    typedef struct {
-        inode_index_t inode_idx;  // 2 bytes
-        char name[14];           // 14 bytes
-    } dir_entry_t;
-
-    dir_entry_t new_entry;
-    new_entry.inode_idx = new_inode_idx;
-
-    // Copy the filename (same truncation rules)
-    memcpy(new_entry.name, basename, name_len >= 14 ? 14 : name_len);
-    if (name_len < 14) {
-        new_entry.name[name_len] = '\0';
-    }
-
-    // Search for a tombstone in the directory
-    size_t offset = 0;
-    size_t entry_size = sizeof(dir_entry_t);  // 16 bytes
-    dir_entry_t temp_entry;
-    size_t bytes_read;
-    int found_tombstone = 0;  // Using int instead of bool (0 = false)
-
-    while (offset < cur_inode->internal.file_size) {
-        if (inode_read_data(context->fs, cur_inode, offset, 
-                        &temp_entry, entry_size, &bytes_read) != SUCCESS || 
-            bytes_read != entry_size) {
-            break;
-        }
-        
-        int is_tombstone = 1;
-        for (size_t i = 0; i < entry_size; i++) {
-            if (((char*)&temp_entry)[i] != 0) {
-                is_tombstone = 0;  // Not a tombstone
-                break;
-            }
-        }
-        if (is_tombstone) {
-            found_tombstone = 1;
-            break;
-        }
-        offset += entry_size;
-    }
-    if (found_tombstone) {
-        inode_modify_data(context->fs, cur_inode, offset, &new_entry, entry_size);
-    } else {
-        inode_write_data(context->fs, cur_inode, &new_entry, entry_size);
-    }
-
-
-
-    return 0;
+   
 }
 
 int new_directory(terminal_context_t *context, char *path)
@@ -466,15 +398,156 @@ int list(terminal_context_t *context, char *path)
     return -2;
 }
 
-char *get_path_string(terminal_context_t *context)
-{
-    if (context == NULL){
-        char *temp = malloc(1 * sizeof(char));
-        temp[0] = '\0'; 
-        return temp;
-    } 
+char *get_path_string(terminal_context_t *context) {
+    if (context == NULL) {
+        char *empty_string = malloc(1);
+        if (empty_string) {
+            empty_string[0] = '\0';
+        }
+        return empty_string;
+    }
 
-    return NULL;
+    if (context->working_directory == &context->fs->inodes[0]) {
+        char *root_path = malloc(5);
+        if (root_path) {
+            strcpy(root_path, "root");
+        }
+        return root_path;
+    }
+
+    typedef struct {
+        inode_index_t inode_idx;
+        char name[14];
+    } dir_entry_t;
+
+    typedef struct name_node {
+        char name[15];
+        size_t name_len;
+        struct name_node *next;
+    } name_node_t;
+
+    name_node_t *stack = NULL;
+
+    inode_t *current_dir = context->working_directory;
+
+    while (current_dir != &context->fs->inodes[0]) {
+        dir_entry_t parent_entry;
+        size_t bytes_read;
+    
+        if (inode_read_data(context->fs, current_dir, 16, &parent_entry, sizeof(dir_entry_t), &bytes_read) != SUCCESS) {
+            while (stack) {
+                name_node_t *temp = stack;
+                stack = stack->next;
+                free(temp);
+            }
+            char *empty = malloc(1);
+            if (empty) empty[0] = '\0';
+            return empty;
+        }
+        
+        inode_t *parent_dir = &context->fs->inodes[parent_entry.inode_idx];
+        
+
+        dir_entry_t entry;
+        size_t offset = 0;
+        int found = 0;
+        
+        while (offset < parent_dir->internal.file_size) {
+            if (inode_read_data(context->fs, parent_dir, offset, 
+                              &entry, sizeof(dir_entry_t), &bytes_read) != SUCCESS) {
+                break;
+            }
+            
+            if (entry.inode_idx == (current_dir - context->fs->inodes)) {
+                if (!(entry.name[0] == '.' && entry.name[1] == '\0') && 
+                    !(entry.name[0] == '.' && entry.name[1] == '.' && entry.name[2] == '\0')) {
+
+                    name_node_t *new_node = malloc(sizeof(name_node_t));
+                    if (!new_node) {
+                        while (stack) {
+                            name_node_t *temp = stack;
+                            stack = stack->next;
+                            free(temp);
+                        }
+                        char *empty = malloc(1);
+                        if (empty) empty[0] = '\0';
+                        return empty;
+                    }
+                    
+                    memcpy(new_node->name, entry.name, 14);
+                    
+                    size_t name_len = 14;
+                    for (size_t i = 0; i < 14; i++) {
+                        if (entry.name[i] == '\0') {
+                            name_len = i;
+                            break;
+                        }
+                    }
+                    
+                    new_node->name_len = name_len;
+                    new_node->name[14] = '\0';
+                    
+                    new_node->next = stack;
+                    stack = new_node;
+                    
+                    found = 1;
+                    break;
+                }
+            }
+            
+            offset += sizeof(dir_entry_t);
+        }
+        
+        if (!found) {
+            while (stack) {
+                name_node_t *temp = stack;
+                stack = stack->next;
+                free(temp);
+            }
+            char *empty = malloc(1);
+            if (empty) empty[0] = '\0';
+            return empty;
+        }
+        
+        current_dir = parent_dir;
+    }
+
+    size_t path_len = 4;
+    name_node_t *node = stack;
+    while (node) {
+        path_len += node->name_len + 1;
+        node = node->next;
+    }
+    
+    char *path = malloc(path_len + 1);
+    if (!path) {
+        while (stack) {
+            name_node_t *temp = stack;
+            stack = stack->next;
+            free(temp);
+        }
+        char *empty = malloc(1);
+        if (empty) empty[0] = '\0';
+        return empty;
+    }
+    
+    strcpy(path, "root");
+    size_t current_pos = 4;
+    
+    while (stack) {
+        path[current_pos] = '/';
+        current_pos++;
+        
+        name_node_t *temp = stack;
+        stack = stack->next;
+        
+        memcpy(path + current_pos, temp->name, temp->name_len);
+        current_pos += temp->name_len;
+        
+        free(temp);
+    }
+    path[current_pos] = '\0';
+    return path;
 }
 
 int tree(terminal_context_t *context, char *path)
