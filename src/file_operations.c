@@ -373,14 +373,25 @@ int remove_file(terminal_context_t *context, char *path)
     if (context == NULL || path == NULL){
         return 0;
     } 
+
+    if (verify_path(path,context->working_directory,context->fs) == 0){
+        return -1;
+    }
+
     return -2;
 }
 
 // we can only delete a directory if it is empty!!
 int remove_directory(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
+    if (context == NULL || path == NULL){
+        return 0;
+    } 
+
+    if (verify_path(path,context->working_directory,context->fs) == 0){
+        return -1;
+    }
+
     return -2;
 }
 
@@ -389,6 +400,11 @@ int change_directory(terminal_context_t *context, char *path)
     if (context == NULL || path == NULL){
         return 0;
     } 
+
+    if (verify_path(path,context->working_directory,context->fs) == 0){
+        return -1;
+    }
+
     return -2;
 }
 
@@ -397,6 +413,11 @@ int list(terminal_context_t *context, char *path)
     if (context == NULL || path == NULL){
         return 0;
     } 
+
+    if (verify_path(path,context->working_directory,context->fs) == 0){
+        return -1;
+    }
+
     return -2;
 }
 
@@ -557,6 +578,10 @@ int tree(terminal_context_t *context, char *path)
     if (context == NULL || path == NULL){
         return 0;
     } 
+
+    if (verify_path(path,context->working_directory,context->fs) == 0){
+        return -1;
+    }
 
     return -2;
 }
