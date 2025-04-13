@@ -335,6 +335,7 @@ int new_file(terminal_context_t *context, char *path, permission_t perms)
         return -1;
     }
 
+    /*
     inode_t* new_inode = &context->fs->inodes[new_inode_idx];
     inode_t *cur_inode;
 
@@ -354,8 +355,9 @@ int new_file(terminal_context_t *context, char *path, permission_t perms)
     } else {
         basename++;
     }
+        */
     
-   
+   return 0;
 }
 
 int new_directory(terminal_context_t *context, char *path)
