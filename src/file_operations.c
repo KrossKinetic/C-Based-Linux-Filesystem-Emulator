@@ -313,6 +313,93 @@ int verify_path_v2(char *path, inode_t* dir, filesystem_t* fs){
     return 1;
 }
 
+int verify_path_v3(char *path, inode_t* dir, filesystem_t* fs){
+    int slashes = count_char_occurrences(path,'/');
+    
+    char * token = strtok(path, "/");
+    char formatted_name[14];
+    format_token_for_comparison(token,formatted_name);
+    
+    inode_t *cur_inode = dir;
+    
+    int is_file = 0;
+    int file_found = 0;
+
+    size_t bytes_read = 0;
+
+    //int count = 0;
+    while(token != NULL && slashes>=0) {
+
+        if (slashes == 0){
+            is_file = 1;
+        }
+
+        byte *all_data = malloc(cur_inode->internal.file_size);
+        inode_read_data(fs,cur_inode,0,all_data,cur_inode->internal.file_size,&bytes_read);
+        byte *original_ptr = all_data;
+
+        for (size_t i = 0; i < (bytes_read)/16; i++){
+            inode_index_t inode_inside_idx;
+            memcpy(&inode_inside_idx,all_data,2);
+            all_data += 2;
+
+            char name_of_inode[14];
+            memcpy(name_of_inode, all_data, 14);
+            format_filename(name_of_inode);
+            all_data+=14;
+
+            if (is_file == 0){
+                if (strcmp(formatted_name,name_of_inode) == 0){
+                    inode_t *next_inode = &fs->inodes[inode_inside_idx];
+                    if (next_inode->internal.file_type == DIRECTORY){
+                        cur_inode = next_inode;
+                        file_found = 1;
+                        break;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            } else {
+                if (strcmp(formatted_name,name_of_inode) == 0){
+                    inode_t *next_inode = &fs->inodes[inode_inside_idx];
+                    
+                    if (next_inode->internal.file_type != DATA_FILE){
+                        REPORT_RETCODE(INVALID_FILE_TYPE);
+                        return 0;
+                    }
+
+                    if (next_inode->internal.file_type == DATA_FILE){
+                        cur_inode = next_inode;
+                        file_found = 1;
+                        break;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+
+        }
+
+        if (file_found == 0 && is_file == 0){
+            REPORT_RETCODE(DIR_NOT_FOUND);
+            return 0;
+        } else if (file_found == 0 && is_file == 1){
+            REPORT_RETCODE(NOT_FOUND);
+            return 0;
+        }
+
+        format_token_for_comparison(strtok(NULL, "/"),formatted_name);
+
+        free(original_ptr);
+        slashes--;
+        file_found = 0;
+    }
+    return 1;
+}
 
 // ----------------------- CORE FUNCTION ----------------------- //
 int new_file(terminal_context_t *context, char *path, permission_t perms)
@@ -365,6 +452,20 @@ int new_directory(terminal_context_t *context, char *path)
     if (context == NULL || path == NULL){
         return 0;
     } 
+
+    if (verify_path_v2(path,context->working_directory,context->fs) == 0){
+        return -1;
+    }
+
+    inode_index_t new_inode_idx;
+
+    fprintf(stderr,"path= %s",path);
+    
+    if (claim_available_inode(context->fs, &new_inode_idx) != SUCCESS) {
+        REPORT_RETCODE(INODE_UNAVAILABLE);
+        return -1;
+    }
+
     return -2;
 }
 
@@ -392,6 +493,8 @@ int remove_directory(terminal_context_t *context, char *path)
         return -1;
     }
 
+    //inode_t *cur_inode = context->working_directory;
+
     return -2;
 }
 
@@ -414,7 +517,7 @@ int list(terminal_context_t *context, char *path)
         return 0;
     } 
 
-    if (verify_path(path,context->working_directory,context->fs) == 0){
+    if (verify_path_v3(path,context->working_directory,context->fs) == 0){
         return -1;
     }
 
@@ -579,11 +682,13 @@ int tree(terminal_context_t *context, char *path)
         return 0;
     } 
 
-    if (verify_path(path,context->working_directory,context->fs) == 0){
+    if (verify_path_v3(path,context->working_directory,context->fs) == 0){
         return -1;
     }
 
-    return -2;
+    printf("root");
+
+    return -1;
 }
 
 //Part 2
