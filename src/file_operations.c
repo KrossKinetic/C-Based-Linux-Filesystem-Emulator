@@ -702,13 +702,14 @@ int list(terminal_context_t *context, char *path)
     return -2;
 }
 
-char *get_path_string(terminal_context_t *context) {
+char *get_path_string(terminal_context_t *context)
+{
     if (context == NULL) {
-        char *empty_string = malloc(1);
-        if (empty_string) {
-            empty_string[0] = '\0';
+        char *empty_str = malloc(1);
+        if (empty_str) {
+            empty_str[0] = '\0';
         }
-        return empty_string;
+        return empty_str;
     }
 
     if (context->working_directory == &context->fs->inodes[0]) {
@@ -731,41 +732,38 @@ char *get_path_string(terminal_context_t *context) {
     } name_node_t;
 
     name_node_t *stack = NULL;
-
-    inode_t *current_dir = context->working_directory;
-
-    while (current_dir != &context->fs->inodes[0]) {
+    
+    inode_t *cur_dir = context->working_directory;
+    
+    while (cur_dir != &context->fs->inodes[0]) {
         dir_entry_t parent_entry;
         size_t bytes_read;
-    
-        if (inode_read_data(context->fs, current_dir, 16, &parent_entry, sizeof(dir_entry_t), &bytes_read) != SUCCESS) {
+        
+        if (inode_read_data(context->fs, cur_dir, 16, 
+                          &parent_entry, sizeof(dir_entry_t), &bytes_read) != SUCCESS) {
             while (stack) {
                 name_node_t *temp = stack;
                 stack = stack->next;
                 free(temp);
             }
-            char *empty = malloc(1);
-            if (empty) empty[0] = '\0';
-            return empty;
+            char *empty_str = malloc(1);
+            if (empty_str) empty_str[0] = '\0';
+            return empty_str;
         }
         
         inode_t *parent_dir = &context->fs->inodes[parent_entry.inode_idx];
         
-
         dir_entry_t entry;
         size_t offset = 0;
         int found = 0;
         
         while (offset < parent_dir->internal.file_size) {
-            if (inode_read_data(context->fs, parent_dir, offset, 
-                              &entry, sizeof(dir_entry_t), &bytes_read) != SUCCESS) {
-                break;
-            }
+            if (inode_read_data(context->fs, parent_dir, offset, &entry, sizeof(dir_entry_t), &bytes_read) != SUCCESS) break;
             
-            if (entry.inode_idx == (current_dir - context->fs->inodes)) {
+            if (entry.inode_idx == (cur_dir - context->fs->inodes)) {
                 if (!(entry.name[0] == '.' && entry.name[1] == '\0') && 
                     !(entry.name[0] == '.' && entry.name[1] == '.' && entry.name[2] == '\0')) {
-
+                    
                     name_node_t *new_node = malloc(sizeof(name_node_t));
                     if (!new_node) {
                         while (stack) {
@@ -773,9 +771,9 @@ char *get_path_string(terminal_context_t *context) {
                             stack = stack->next;
                             free(temp);
                         }
-                        char *empty = malloc(1);
-                        if (empty) empty[0] = '\0';
-                        return empty;
+                        char *empty_str = malloc(1);
+                        if (empty_str) empty_str[0] = '\0';
+                        return empty_str;
                     }
                     
                     memcpy(new_node->name, entry.name, 14);
@@ -808,14 +806,14 @@ char *get_path_string(terminal_context_t *context) {
                 stack = stack->next;
                 free(temp);
             }
-            char *empty = malloc(1);
-            if (empty) empty[0] = '\0';
-            return empty;
+            char *empty_str = malloc(1);
+            if (empty_str) empty_str[0] = '\0';
+            return empty_str;
         }
         
-        current_dir = parent_dir;
+        cur_dir = parent_dir;
     }
-
+    
     size_t path_len = 4;
     name_node_t *node = stack;
     while (node) {
@@ -830,27 +828,29 @@ char *get_path_string(terminal_context_t *context) {
             stack = stack->next;
             free(temp);
         }
-        char *empty = malloc(1);
-        if (empty) empty[0] = '\0';
-        return empty;
+        char *empty_str = malloc(1);
+        if (empty_str) empty_str[0] = '\0';
+        return empty_str;
     }
     
     strcpy(path, "root");
-    size_t current_pos = 4;
+    size_t cur_pos = 4;
     
     while (stack) {
-        path[current_pos] = '/';
-        current_pos++;
+        path[cur_pos] = '/';
+        cur_pos++;
         
         name_node_t *temp = stack;
         stack = stack->next;
         
-        memcpy(path + current_pos, temp->name, temp->name_len);
-        current_pos += temp->name_len;
+        memcpy(path + cur_pos, temp->name, temp->name_len);
+        cur_pos += temp->name_len;
         
         free(temp);
     }
-    path[current_pos] = '\0';
+    
+    path[cur_pos] = '\0';
+    
     return path;
 }
 
