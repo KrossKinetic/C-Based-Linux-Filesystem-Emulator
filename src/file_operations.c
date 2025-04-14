@@ -8,19 +8,6 @@
 #define DIRECTORY_ENTRIES_PER_DATABLOCK (DATA_BLOCK_SIZE / DIRECTORY_ENTRY_SIZE)
 
 // ----------------------- HELPER FUNCTION --------------------- //
-void print_string_from_void(void* ptr) {
-    if (ptr == NULL) {
-        fprintf(stderr,"Error: NULL pointer provided\n");
-        return;
-    }
-    
-    // Cast the void pointer to a char pointer
-    char* str_ptr = (char*)ptr;
-    
-    // Print the content as a string
-    fprintf(stderr,"\n%s\n", str_ptr);
-}
-
 void format_token_for_comparison(char* token, char formatted_name[14]) {
     if (token == NULL) {
         memset(formatted_name, 0, 14);
