@@ -88,3 +88,7 @@ The project is configured to be built with CMake.
     ./build/part2_tests
     ./build/part3_tests
     ```
+
+---
+
+## CSE220 Completion Score: 87%
