@@ -1,4 +1,4 @@
-# CSE 220: C-Based Linux Filesystem Emulator
+# CSE 220 HW3: C-Based Linux Filesystem Emulator
 
 This project, developed for CSE 220: Systems Fundamentals I, is an in-memory emulation of a Linux-like filesystem written entirely in C. It involves managing core filesystem structures like i-nodes and data blocks, handling memory allocation, and implementing a hierarchical file and directory system from the ground up.
 
@@ -91,4 +91,4 @@ The project is configured to be built with CMake.
 
 ---
 
-## CSE220 Completion Score: 87%
+## CSE220 Completion Score: 87%, Class Average Score of HW 1-4: 60%-70%
